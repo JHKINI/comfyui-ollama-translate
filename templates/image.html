@@ -61,6 +61,9 @@
   .meta a{color:var(--accent-2); text-decoration:none}
   .error{background:rgba(255,107,122,.1); border:1px solid rgba(255,107,122,.35); color:var(--danger); padding:12px 14px; border-radius:10px; font-size:14px; margin-bottom:14px}
 
+  .jsonbox{margin-top:14px; background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:10px 14px}
+  .jsonbox summary{cursor:pointer; font-size:13px; font-weight:500; color:var(--accent-2); user-select:none}
+  .jsonbox pre{margin:10px 0 2px; font-size:13px; line-height:1.6; white-space:pre-wrap; word-break:break-word; color:var(--text); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .loading{display:none; position:absolute; inset:0; background:rgba(14,15,20,.75); align-items:center; justify-content:center; flex-direction:column; gap:14px; color:var(--muted); font-size:14px}
   .loading.on{display:flex}
   .spinner{width:42px; height:42px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--accent); animation:spin 1s linear infinite}
@@ -100,8 +103,11 @@
         {% endif %}
         <div class="loading" id="loading"><div class="spinner"></div>GPU 서버에서 생성 중…</div>
       </div>
-      {% if translated_pos %}
-      <div class="meta"><span>번역된 프롬프트: {{ translated_pos }}</span></div>
+      {% if prompts_json %}
+      <details class="jsonbox" open>
+        <summary>구조화 출력 (JSON)</summary>
+        <pre>{{ prompts_json }}</pre>
+      </details>
       {% endif %}
       {% if img_url %}
       <div class="meta">

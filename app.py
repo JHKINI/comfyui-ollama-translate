@@ -2,6 +2,10 @@
 from flask import Flask, request, render_template, Response, abort
 import requests, json, time, os
 import random
+from langchain_core.exceptions import OutputParserException
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # GPU 서버(ComfyUI) 주소 — 환경변수 COMFY_URL 로 변경 가능
@@ -27,24 +31,48 @@ def update_prompts(graph: dict, pos: str, neg: str,
     graph[pos_node_id]["inputs"]["text"] = pos    
     graph[neg_node_id]["inputs"]["text"] = neg
     return graph
-def translate_to_english(text: str) -> str:
-    """Ollama로 한국어 프롬프트를 영어로 번역
-    gemma4:e2b가 콜드 로딩에 몇 분씩 걸릴 수 있어, 중간에 끊지 않고 한 번에 길게 기다림
-    (타임아웃으로 연결을 끊으면 서버 쪽 로딩 자체가 취소돼서 재시도해도 또 처음부터 콜드 로딩됨)"""
-    if not text.strip():
-        return text
-    prompt = f"{text}\n\n영어로 번역해줘. 번역된 문장만 출력해."
+# 한 번의 Ollama 호출로 positive/negative를 함께 영어로 변환해 JSON으로 받는 LangChain 체인
+# (gemma4:e2b가 콜드 로딩에 몇 분 걸릴 수 있어 타임아웃을 길게 두고 재시도하지 않음)
+_llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_URL, temperature=0.2,
+                  format="json", keep_alive="30m", client_kwargs={"timeout": 300})
+_parser = JsonOutputParser()
+_prompt = ChatPromptTemplate.from_template(
+    """다음 한국어 이미지 생성 프롬프트를 영어로 번역해서 JSON으로만 출력해.
+- "eng_positive": 아래 positive 문장의 영어 번역 (이미지 생성용으로 간결한 묘사)
+- "eng_negative": 아래 negative 문장의 영어 번역 (negative가 비어 있으면 빈 문자열)
+번역된 문장 외의 설명은 쓰지 마.
+{format_instructions}
+
+positive: {kor_positive}
+negative: {kor_negative}
+"""
+)
+_chain = _prompt | _llm | _parser
+
+
+def build_prompts(kor_pos: str, kor_neg: str) -> dict:
+    """한국어 입력 -> {kor_positive, kor_negative, eng_positive, eng_negative}
+    kor_* 는 사용자가 입력한 원문 그대로, eng_* 는 모델이 번역한 결과"""
+    result = {"kor_positive": kor_pos, "kor_negative": kor_neg,
+              "eng_positive": "", "eng_negative": ""}
+    if not kor_pos.strip() and not kor_neg.strip():
+        return result
     try:
-        r = requests.post(f"{OLLAMA_URL}/api/generate",
-                           json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                                 "keep_alive": "30m"},
-                           timeout=300)
-    except requests.exceptions.ReadTimeout:
-        raise RuntimeError(
-            f"번역 서버({OLLAMA_URL})가 5분 넘게 응답하지 않습니다. "
-            "모델이 멈췄을 수 있어요 — 로컬 PC에서 ollama 상태를 확인해주세요.")
-    r.raise_for_status()
-    return r.json()["response"].strip()
+        out = _chain.invoke({"kor_positive": kor_pos, "kor_negative": kor_neg,
+                             "format_instructions": _parser.get_format_instructions()})
+    except OutputParserException as e:
+        raise RuntimeError(f"번역 결과를 JSON으로 파싱하지 못했습니다. 다시 시도해주세요. ({e})")
+    except Exception as e:
+        if "timed out" in str(e).lower():
+            raise RuntimeError(
+                f"번역 서버({OLLAMA_URL})가 5분 넘게 응답하지 않습니다. "
+                "모델이 멈췄을 수 있어요 — 로컬 PC에서 ollama 상태를 확인해주세요.")
+        raise
+    result["eng_positive"] = str(out.get("eng_positive", "")).strip()
+    result["eng_negative"] = str(out.get("eng_negative", "")).strip()
+    if kor_pos.strip() and not result["eng_positive"]:
+        raise RuntimeError("번역 결과에 eng_positive가 없습니다. 다시 시도해주세요.")
+    return result
 
 def free_comfy_vram() -> None:
     """ComfyUI가 들고 있는 체크포인트를 VRAM에서 내림 (Ollama가 로딩할 공간을 비워줌)"""
@@ -96,19 +124,19 @@ def index():
     img_url = ""
     error = ""
     elapsed = None
-    translated_pos = ""
+    prompts = None
 
     if request.method == "POST":
         start = time.time()
         try:
             free_comfy_vram()
             try:
-                translated_pos = translate_to_english(pos)
+                prompts = build_prompts(pos, neg)
             except requests.exceptions.ConnectionError:
                 raise RuntimeError(f"번역 서버({OLLAMA_URL})에 연결할 수 없습니다.")
 
             graph = load_workflow(WORKFLOW_PATH)
-            graph = update_prompts(graph, translated_pos, neg)  # 필요 시 노드 ID 인자 조정 가능
+            graph = update_prompts(graph, prompts["eng_positive"], prompts["eng_negative"])  # 필요 시 노드 ID 인자 조정 가능
             prompt_id = submit_prompt(graph)
             history_block = poll_history(prompt_id)
             img_url = extract_first_image_url(history_block)
@@ -124,7 +152,8 @@ def index():
 
     return render_template("image.html", pos=pos, neg=neg, img_url=img_url,
                            error=error, elapsed=elapsed, comfy_url=COMFY_URL,
-                           translated_pos=translated_pos)
+                           prompts=prompts,
+                           prompts_json=json.dumps(prompts, ensure_ascii=False, indent=2) if prompts else "")
 
 @app.route("/view")
 def view():

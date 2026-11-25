@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>LangChain + Ollama 요약 Chain</title>
+<style>
+  .kw { display: inline-block; background: #e8f0fe; border-radius: 12px; padding: 2px 10px; margin: 2px; }
+  .box { border: 1px solid #ccc; border-radius: 6px; padding: 10px 14px; margin: 10px 0; max-width: 640px; }
+  .box h4 { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<h3>LangChain + Ollama 요약 Chain</h3>
+
+<label>요약할 텍스트:</label><br>
+<textarea id="text" rows="10" cols="80" placeholder="요약할 글을 붙여 넣으세요."></textarea><br><br>
+
+<button id="run">요약하기</button>
+<button id="runJson">구조화 요약 (JSON)</button>
+
+<div id="status"></div>
+<pre id="out" style="white-space: pre-wrap;"></pre>
+
+<div id="structured" style="display:none">
+  <div class="box"><h4>한 줄 요약</h4><div id="oneline"></div></div>
+  <div class="box"><h4>핵심 요약</h4><div id="summary"></div></div>
+  <div class="box"><h4>키워드</h4><div id="keywords"></div></div>
+  <details><summary>원본 JSON</summary><pre id="raw"></pre></details>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function getText() {
+  const text = $("text").value.trim();
+  if (!text) alert("텍스트를 입력하세요.");
+  return text;
+}
+
+async function post(url, text) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+  return res.json();
+}
+
+$("run").onclick = async () => {
+  const text = getText();
+  if (!text) return;
+  $("structured").style.display = "none";
+  $("out").textContent = "요약 중...";
+  try {
+    const data = await post("/summarize", text);
+    $("out").textContent = data.summary || data.error || JSON.stringify(data, null, 2);
+  } catch (e) {
+    $("out").textContent = String(e);
+  }
+};
+
+$("runJson").onclick = async () => {
+  const text = getText();
+  if (!text) return;
+  $("structured").style.display = "none";
+  $("out").textContent = "구조화 요약 중...";
+  try {
+    const data = await post("/summarize/structured", text);
+    if (data.error) {
+      $("out").textContent = data.error;
+      return;
+    }
+    $("out").textContent = "";
+    $("oneline").textContent = data.oneline ?? "";
+    $("summary").textContent = data.summary ?? "";
+    $("keywords").innerHTML = "";
+    (data.keywords || []).forEach((k) => {
+      const s = document.createElement("span");
+      s.className = "kw";
+      s.textContent = k;
+      $("keywords").appendChild(s);
+    });
+    $("raw").textContent = JSON.stringify(data, null, 2);
+    $("structured").style.display = "block";
+  } catch (e) {
+    $("out").textContent = String(e);
+  }
+};
+</script>
+</body>
+</html>

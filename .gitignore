@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.env
+
+# 실제 내부 IP가 들어 있는 개인용 문서/스크립트
+재실행_가이드.md
+VM_배포가이드.md
+WORK_LOG.md
+deploy_vm.sh
+app2.py
+
+# 외부 기사 원문(저작권) — 요약 실습용 샘플은 직접 준비
+langchain_practice/sample1.txt
+
+# 이전 세션 산출물 zip (내부 IP 포함)
+templates/Claude outputs/
