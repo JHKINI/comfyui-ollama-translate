@@ -1,5 +1,5 @@
-# Prompt Studio   
-한국어 입력 → LangChain 구조화 번역 → ComfyUI 이미지 생성
+## Prompt Studio   
+#한국어 입력 → LangChain 구조화 번역 → ComfyUI 이미지 생성
 
 한국어로 positive / negative 프롬프트를 입력하면, 로컬 LLM(Ollama `gemma4:e2b`)이 **한 번의 호출**로 영어 프롬프트를 JSON으로 만들어 주고, 그 결과를 ComfyUI에 보내 이미지를 생성해 웹 화면에 보여주는 Flask 앱입니다.
 
